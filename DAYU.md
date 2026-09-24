@@ -19,7 +19,7 @@ fluent-bit 仍只 tail `/var/log/audit/audit.log`，规则变了采集配置不�
 | `execve -F auid>=1000` | +0（本机无交互用户） | **开**（`process_creation_user`） |
 | `execve -F exe=/usr/bin/bash` | **+1 MB/天** | **开**（`process_creation_bash`） |
 | `connect` 仅 bash / python3 / nc（IPv4/IPv6） | 金丝雀 | **开**（`bash_connect` / `python_connect` / `nc_connect`）；全量 connect 仍关 |
-| 当天 SYSCALL 的 97% | `comm=cron` | **排除** cron 其它 syscall；**开** `cron_exec`（只记 cron 的 execve） |
+| 当天 SYSCALL 的 97% | `comm=cron` | **排除** cron 其它 syscall；`cron_exec` 已于 09-24 删除（实测 0 命中） |
 
 其余：
 

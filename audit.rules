@@ -74,12 +74,12 @@
 -a never,user -F subj_type=crond_t
 -a never,exit -F subj_type=crond_t
 ## [dayu] Ubuntu/Debian have no SELinux, so the crond_t filters never match.
-## Lab host SYSCALL volume was 97% comm=cron. Exclude the cron daemon by exe,
-## but keep execve so we can see which binary cron launched (first match wins).
--a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/sbin/cron -k cron_exec
--a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/sbin/cron -k cron_exec
--a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/sbin/crond -k cron_exec
--a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/sbin/crond -k cron_exec
+## Lab host SYSCALL volume was 97% comm=cron. Exclude the cron daemon by exe.
+##
+## 2026-09-24: cron_exec（-S execve -F exe=/usr/sbin/cron）已删除 —— 实测 0 命中。
+## execve 规则的 -F exe= 匹配的是「被执行的二进制」（process_creation_bash 的
+## 199 条全是 exe=/usr/bin/bash），而 cron 从不 exec 自己。要「cron 实际跑了
+## 哪条命令」用 syslog 的 `CRON[pid]: (user) CMD (...)`。
 -a never,exit -F arch=b64 -S all -F exe=/usr/sbin/cron
 -a never,exit -F arch=b32 -S all -F exe=/usr/sbin/cron
 -a never,exit -F arch=b64 -S all -F exe=/usr/sbin/crond
