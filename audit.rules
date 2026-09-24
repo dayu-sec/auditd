@@ -97,9 +97,17 @@
 -a never,exit -F arch=b64 -S all -F exe=/usr/bin/vmtoolsd
 -a never,exit -F arch=b32 -S all -F exe=/usr/bin/vmtoolsd
 
-## [dayu] Optional Tencent Cloud agent exclusions (uncomment if they dominate).
-#-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/YunJing/YDEyes/YDService
-#-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/tat_agent/tat_agent
+## [dayu] Tencent Cloud agent exclusions.
+## 2026-09-24 实测（LAB-TARGET-01，audit.log 近 20 万行）：
+##   process_vm 31,842 全部来自 exe=/usr/local/qcloud/YunJing/YDEyes/YDService（CWP Agent 扫内存）
+##   usr_writes 26,165 中 32,444 来自 exe=/usr/local/qcloud/monitor/python26/bin/python（云监控写自己的日志）
+##   两者合计约 29% 的 audit 量，且是 Agent 自身操作 → 全排除。
+-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/YunJing/YDEyes/YDService
+-a never,exit -F arch=b32 -S all -F exe=/usr/local/qcloud/YunJing/YDEyes/YDService
+-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/YunJing/YDLive/YDLive
+-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/monitor/python26/bin/python
+-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/tat_agent/tat_agent
+-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/stargate/bin/sgagent
 
 ## High Volume Event Filter (especially on Linux Workstations)
 -a never,exit -F arch=b32 -F dir=/dev/shm/ -F key=sharedmemaccess
