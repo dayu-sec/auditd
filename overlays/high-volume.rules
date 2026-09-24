@@ -1,0 +1,25 @@
+## High Volume overlay — NOT loaded by default.
+## Copy to /etc/audit/rules.d/ only after a 24h volume check.
+## Lab host LAB-TARGET-01: full execve = +300 MB/day (2026-09-23).
+##
+## Do not place this file in rules.d/ alongside 99-dayu.rules unless you
+## intend to turn these on. augenrules loads every *.rules file.
+
+## Process creation (full)
+-a always,exit -F arch=b32 -S execve -S execveat -k process_creation
+-a always,exit -F arch=b64 -S execve -S execveat -k process_creation
+
+## Successful IPv4/IPv6 connect
+-a always,exit -F arch=b64 -S connect -F a2=16 -F success=1 -F key=network_connect_4
+-a always,exit -F arch=b32 -S connect -F a2=16 -F success=1 -F key=network_connect_4
+-a always,exit -F arch=b64 -S connect -F a2=28 -F success=1 -F key=network_connect_6
+-a always,exit -F arch=b32 -S connect -F a2=28 -F success=1 -F key=network_connect_6
+
+## AF_INET / AF_INET6 socket()
+-a always,exit -F arch=b32 -S socket -F a0=2  -k network_socket_created
+-a always,exit -F arch=b64 -S socket -F a0=2  -k network_socket_created
+-a always,exit -F arch=b32 -S socket -F a0=10 -k network_socket_created
+-a always,exit -F arch=b64 -S socket -F a0=10 -k network_socket_created
+
+## 32-bit ABI catch-all
+-a always,exit -F arch=b32 -S all -k 32bit_abi

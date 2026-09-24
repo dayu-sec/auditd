@@ -14,6 +14,11 @@
 # threat-actor TTPs) belongs in Sigma rules evaluated by your SIEM or
 # a host-level agent, not in the audit ruleset itself.
 #
+# [dayu-sec fork] https://github.com/dayu-sec/auditd
+# Upstream: Neo23x0/auditd. High-volume defaults are OFF (see DAYU.md).
+# Do not enable -e 2. Do not load overlays/high-volume.rules until a 24h
+# volume check on the target host passes.
+#
 # UID_MIN convention
 #   Rules that target human-user activity use `auid>=1000 -F auid!=unset`.
 #   1000 is the default UID_MIN on Debian/Ubuntu and RHEL 7+ / Fedora.
@@ -37,6 +42,10 @@
 ## Keep optional distro-specific paths from aborting the whole load.
 ## For strict validation, test a copy of this file with this line removed.
 -i
+
+# [dayu] Optional kernel rate limit (events/sec). Upstream leaves this unset.
+# Enable if backlog/lost climbs. Current lab hosts have rate_limit=0.
+#-r 500
 
 # Self Auditing ---------------------------------------------------------------
 
@@ -64,6 +73,17 @@
 ## filters if not running SELinux.
 -a never,user -F subj_type=crond_t
 -a never,exit -F subj_type=crond_t
+## [dayu] Ubuntu/Debian have no SELinux, so the crond_t filters never match.
+## Lab host SYSCALL volume was 97% comm=cron. Exclude the cron daemon by exe,
+## but keep execve so we can see which binary cron launched (first match wins).
+-a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/sbin/cron -k cron_exec
+-a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/sbin/cron -k cron_exec
+-a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/sbin/crond -k cron_exec
+-a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/sbin/crond -k cron_exec
+-a never,exit -F arch=b64 -S all -F exe=/usr/sbin/cron
+-a never,exit -F arch=b32 -S all -F exe=/usr/sbin/cron
+-a never,exit -F arch=b64 -S all -F exe=/usr/sbin/crond
+-a never,exit -F arch=b32 -S all -F exe=/usr/sbin/crond
 
 ## Optional, distro-specific chrony/ntp suppression (commented out by default):
 ## Account names differ across distros (chrony vs _chrony on Ubuntu 24.04) so
@@ -76,6 +96,10 @@
 ## Open VM Tools
 -a never,exit -F arch=b64 -S all -F exe=/usr/bin/vmtoolsd
 -a never,exit -F arch=b32 -S all -F exe=/usr/bin/vmtoolsd
+
+## [dayu] Optional Tencent Cloud agent exclusions (uncomment if they dominate).
+#-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/YunJing/YDEyes/YDService
+#-a never,exit -F arch=b64 -S all -F exe=/usr/local/qcloud/tat_agent/tat_agent
 
 ## High Volume Event Filter (especially on Linux Workstations)
 -a never,exit -F arch=b32 -F dir=/dev/shm/ -F key=sharedmemaccess
@@ -117,8 +141,9 @@
 -a always,exit -F arch=b64 -S kexec_file_load -k KEXEC
 
 ## Special files
--a always,exit -F arch=b64 -S mknod -S mknodat -k specialfiles
--a always,exit -F arch=b32 -S mknod -S mknodat -k specialfiles
+## [dayu] auid!=unset: container runtimes call mknod constantly otherwise.
+-a always,exit -F arch=b64 -S mknod -S mknodat -F auid!=unset -k specialfiles
+-a always,exit -F arch=b32 -S mknod -S mknodat -F auid!=unset -k specialfiles
 
 ## Mount operations (only attributable)
 -a always,exit -F arch=b64 -S mount -S umount2 -S move_mount -S open_tree -S fsopen -S fsconfig -S fsmount -F auid!=unset -k mount
@@ -185,13 +210,12 @@
 -a always,exit -F arch=b64 -S sethostname -S setdomainname -k network_modifications
 -a always,exit -F arch=b32 -S sethostname -S setdomainname -k network_modifications
 
-### Successful IPv4 Connections
--a always,exit -F arch=b64 -S connect -F a2=16 -F success=1 -F key=network_connect_4
--a always,exit -F arch=b32 -S connect -F a2=16 -F success=1 -F key=network_connect_4
-
-### Successful IPv6 Connections
--a always,exit -F arch=b64 -S connect -F a2=28 -F success=1 -F key=network_connect_6
--a always,exit -F arch=b32 -S connect -F a2=28 -F success=1 -F key=network_connect_6
+### Successful IPv4/IPv6 Connections
+## [dayu] off: connect() volume matches High Volume. See overlays/high-volume.rules.
+#-a always,exit -F arch=b64 -S connect -F a2=16 -F success=1 -F key=network_connect_4
+#-a always,exit -F arch=b32 -S connect -F a2=16 -F success=1 -F key=network_connect_4
+#-a always,exit -F arch=b64 -S connect -F a2=28 -F success=1 -F key=network_connect_6
+#-a always,exit -F arch=b32 -S connect -F a2=28 -F success=1 -F key=network_connect_6
 
 ### Changes to other files
 -w /etc/hosts -p wa -k network_modifications
@@ -288,20 +312,19 @@
 -a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/usr/bin -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
 -a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/usr/sbin -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
 -a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/usr/sbin -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/var -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/var -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/home -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/home -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/srv -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
--a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/srv -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
-
-### Permission-denied opens from system accounts/daemons (no login session).
-### Narrower than success=0 above to avoid the file-not-found noise that
-### dominates daemon activity — EACCES/EPERM are the high-signal cases.
--a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EACCES -F auid=unset -k unauthedfileaccess_system
--a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EPERM -F auid=unset -k unauthedfileaccess_system
--a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EACCES -F auid=unset -k unauthedfileaccess_system
--a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EPERM -F auid=unset -k unauthedfileaccess_system
+## [dayu] off: /var /home /srv failed opens, and auid=unset EACCES/EPERM (daemon noise).
+#-a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/var -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#-a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/var -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#-a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/home -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#-a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/home -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#-a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/srv -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#-a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F dir=/srv -F success=0 -F auid>=1000 -F auid!=unset -k unauthedfileaccess
+#
+# [dayu] off: Permission-denied opens from system accounts/daemons (no login session).
+#-a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EACCES -F auid=unset -k unauthedfileaccess_system
+#-a always,exit -F arch=b64 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EPERM -F auid=unset -k unauthedfileaccess_system
+#-a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EACCES -F auid=unset -k unauthedfileaccess_system
+#-a always,exit -F arch=b32 -S open -S openat -S openat2 -S open_by_handle_at -F exit=-EPERM -F auid=unset -k unauthedfileaccess_system
 
 ## Session initiation information
 -w /var/run/utmp -p wa -k session
@@ -391,12 +414,11 @@
 
 # Socket Creations
 # will catch both IPv4 and IPv6
-
--a always,exit -F arch=b32 -S socket -F a0=2  -k network_socket_created
--a always,exit -F arch=b64 -S socket -F a0=2  -k network_socket_created
-
--a always,exit -F arch=b32 -S socket -F a0=10 -k network_socket_created
--a always,exit -F arch=b64 -S socket -F a0=10 -k network_socket_created
+## [dayu] off: AF_INET/INET6 socket() is High Volume. See overlays/high-volume.rules.
+#-a always,exit -F arch=b32 -S socket -F a0=2  -k network_socket_created
+#-a always,exit -F arch=b64 -S socket -F a0=2  -k network_socket_created
+#-a always,exit -F arch=b32 -S socket -F a0=10 -k network_socket_created
+#-a always,exit -F arch=b64 -S socket -F a0=10 -k network_socket_created
 
 ## Optional overlay: enable only if splice/vmsplice are rare in your estate.
 ## Correlate short bursts of these events with recent af_alg activity from the
@@ -412,6 +434,11 @@
 -w /etc/yum.repos.d/ -p wa -k software_mgmt
 
 ## Container configuration
+## [dayu] -w on a directory is NOT recursive (auditctl: use -F dir= for trees).
+## This sees create/delete under /var/lib/docker itself (new overlay/container
+## dirs), not every write inside a container writable layer. Do NOT switch to
+## -F dir=/var/lib/docker — that is the overlay2 flood. Container exec/connect
+## come from process_creation_* / bash_connect / python_connect / nc_connect.
 -w /var/lib/docker -p wa -k docker
 -w /etc/docker -p wa -k docker
 -w /etc/containers/ -p wa -k containers
@@ -434,44 +461,69 @@
 
 # ipc system call
 # /usr/include/linux/ipc.h
-
+## [dayu] off: docker/container IPC is noisy. Re-enable only after a volume check.
 ## NOTE: glibc's semop() is implemented via semtimedop() on modern systems;
 ## the standalone semop name was dropped from some libaudit tables.
--a always,exit -F arch=b64 -S msgctl -S msgget -S semctl -S semget -S shmctl -S shmget -k Inter-Process_Communication
--a always,exit -F arch=b32 -S msgctl -S msgget -S semctl -S semget -S shmctl -S shmget -k Inter-Process_Communication
+#-a always,exit -F arch=b64 -S msgctl -S msgget -S semctl -S semget -S shmctl -S shmget -k Inter-Process_Communication
+#-a always,exit -F arch=b32 -S msgctl -S msgget -S semctl -S semget -S shmctl -S shmget -k Inter-Process_Communication
 
 # High Volume Events ----------------------------------------------------------
 
 ## Disable these rules if they create too many events in your environment
+## [dayu] Default OFF. Lab host: full execve = +300 MB/day. See overlays/high-volume.rules.
+## SUID execution: generate path watches with scripts/gen-privileged-rules.sh
+## (linux-audit 31-privileged). Do NOT use -S setuid,setgid,setresuid,setresgid.
+
+## [dayu] Existing lab watches (low volume). Restored because -D clears prior rules.
+-w /usr/bin/curl -p x -k net-tool-exec
+-w /usr/bin/wget -p x -k net-tool-exec
+-w /usr/bin/nc -p x -k net-tool-exec
+-w /usr/bin/python3 -p x -k interpreter-exec
 
 ## Process creation
 ### Collect generic execution telemetry and derive tool- and context-specific
 ### detections in downstream tooling such as Sigma / SIEM content.
--a always,exit -F arch=b32 -S execve -S execveat -k process_creation
--a always,exit -F arch=b64 -S execve -S execveat -k process_creation
+## [dayu] full execve stays off (+300 MB/day on lab).
+## Interactive users + every bash. Lab: bash-only was +1 MB/day.
+#-a always,exit -F arch=b32 -S execve -S execveat -k process_creation
+#-a always,exit -F arch=b64 -S execve -S execveat -k process_creation
+-a always,exit -F arch=b32 -S execve -S execveat -F auid>=1000 -F auid!=unset -k process_creation_user
+-a always,exit -F arch=b64 -S execve -S execveat -F auid>=1000 -F auid!=unset -k process_creation_user
+-a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/bin/bash -k process_creation_bash
+-a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/bin/bash -k process_creation_bash
+## [dayu] bash connect canary (reverse shell /dev/tcp). Not full connect().
+-a always,exit -F arch=b32 -S connect -F exe=/usr/bin/bash -F a2=16 -F success=1 -k bash_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/bash -F a2=16 -F success=1 -k bash_connect
+-a always,exit -F arch=b32 -S connect -F exe=/usr/bin/bash -F a2=28 -F success=1 -k bash_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/bash -F a2=28 -F success=1 -k bash_connect
+## [dayu] python/nc connect canary. python3 is often a symlink; include the real binary.
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/python3 -F a2=16 -F success=1 -k python_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/python3 -F a2=28 -F success=1 -k python_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/python3.12 -F a2=16 -F success=1 -k python_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/python3.12 -F a2=28 -F success=1 -k python_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/nc -F a2=16 -F success=1 -k nc_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/nc -F a2=28 -F success=1 -k nc_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/nc.openbsd -F a2=16 -F success=1 -k nc_connect
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/nc.openbsd -F a2=28 -F success=1 -k nc_connect
 
 ## File Deletion Events by User
 -a always,exit -F arch=b64 -S rmdir -S unlink -S unlinkat -S rename -S renameat -S renameat2 -F auid>=1000 -F auid!=unset -k delete
 -a always,exit -F arch=b32 -S rmdir -S unlink -S unlinkat -S rename -S renameat -S renameat2 -F auid>=1000 -F auid!=unset -k delete
 
-## File Access
-### Unauthorized Access (unsuccessful)
--a always,exit -F arch=b64 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k file_access
--a always,exit -F arch=b64 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k file_access
--a always,exit -F arch=b32 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k file_access
--a always,exit -F arch=b32 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k file_access
-
-### Unsuccessful Creation
--a always,exit -F arch=b64 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EACCES -k file_creation
--a always,exit -F arch=b64 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EPERM -k file_creation
--a always,exit -F arch=b32 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EACCES -k file_creation
--a always,exit -F arch=b32 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EPERM -k file_creation
-
-### Unsuccessful Modification
--a always,exit -F arch=b64 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EACCES -k file_modification
--a always,exit -F arch=b64 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EPERM -k file_modification
--a always,exit -F arch=b32 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EACCES -k file_modification
--a always,exit -F arch=b32 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EPERM -k file_modification
+## File Access / Creation / Modification (unsuccessful)
+## [dayu] off: overlaps unauthedfileaccess and is wider (no dir scope / no auid on create).
+#-a always,exit -F arch=b64 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k file_access
+#-a always,exit -F arch=b64 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k file_access
+#-a always,exit -F arch=b32 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k file_access
+#-a always,exit -F arch=b32 -S creat -S open -S openat -S openat2 -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k file_access
+#-a always,exit -F arch=b64 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EACCES -k file_creation
+#-a always,exit -F arch=b64 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EPERM -k file_creation
+#-a always,exit -F arch=b32 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EACCES -k file_creation
+#-a always,exit -F arch=b32 -S mkdir -S mkdirat -S creat -S link -S linkat -S symlink -S symlinkat -S mknod -S mknodat -F exit=-EPERM -k file_creation
+#-a always,exit -F arch=b64 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EACCES -k file_modification
+#-a always,exit -F arch=b64 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EPERM -k file_modification
+#-a always,exit -F arch=b32 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EACCES -k file_modification
+#-a always,exit -F arch=b32 -S rename -S renameat -S renameat2 -S truncate -S chmod -S setxattr -S lsetxattr -S removexattr -S lremovexattr -F exit=-EPERM -k file_modification
 
 ## 32bit ABI Exploitation
 ### https://github.com/linux-audit/audit-userspace/blob/c014eec64b3a16c004f4a75e5792a4ac2fcc0df2/rules/21-no32bit.rules
@@ -481,8 +533,9 @@
 ### bit ABI.
 ### NOTE: Explicit b32 rules above provide specific keys for SIEM correlation;
 ### this catch-all additionally tags all 32-bit activity under a single key.
--a always,exit -F arch=b32 -S all -k 32bit_abi
+## [dayu] off: keep as overlay. Specific b32 twins of security syscalls stay on.
+#-a always,exit -F arch=b32 -S all -k 32bit_abi
 
 # Make The Configuration Immutable --------------------------------------------
-
+## [dayu] Keep disabled. Immutable mode requires reboot to change rules.
 ##-e 2

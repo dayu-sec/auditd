@@ -8,6 +8,8 @@
 
 Best Practice Auditd Configuration
 
+**dayu-sec fork** of [Neo23x0/auditd](https://github.com/Neo23x0/auditd). High-volume defaults (`execve`, `connect`, `socket`, 32-bit `-S all`) are **off**. See [DAYU.md](DAYU.md) for what changed, why, and how to deploy. Rebase onto upstream `master`; keep local edits on the `dayu` branch.
+
 ## Idea
 
 The idea of this auditd configuration is to provide a best-practice baseline that
