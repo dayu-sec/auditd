@@ -16,7 +16,7 @@ fluent-bit 仍只 tail `/var/log/audit/audit.log`，规则变了采集配置不�
 | 基线（4 条 `-p x` watch） | ~3 MB/天 | 保留 |
 | 全量 `execve` | **+300 MB/天** | **关**（`overlays/high-volume.rules`） |
 | `setuid/setgid/setresuid/setresgid` | **+85 MB/天** | **不用**（上游也没有） |
-| `execve -F auid>=1000` | +0（本机无交互用户） | **开**（`process_creation_user`） |
+| `execve -F auid!=unset` | 会话内进程（含 root）；靶机无交互用户故实测 ~0 | **开**（`process_creation_user`；2026-10-09 由 `auid>=1000` 放宽） |
 | `execve -F exe=/usr/bin/bash` | **+1 MB/天** | **开**（`process_creation_bash`） |
 | `connect` 仅 bash / python3 / nc（IPv4/IPv6） | 金丝雀 | **开**（`bash_connect` / `python_connect` / `nc_connect`）；全量 connect 仍关 |
 | 当天 SYSCALL 的 97% | `comm=cron` | **排除** cron 其它 syscall；`cron_exec` 已于 09-24 删除（实测 0 命中） |
@@ -38,6 +38,16 @@ fluent-bit 仍只 tail `/var/log/audit/audit.log`，规则变了采集配置不�
 | `-e 2` immutable | 保持关 | 改规则必须能随时加载 |
 
 **仍开着的上游主体**：身份库 / PAM / sudoers / cron 配置 / SSH / root `.ssh` / 内核模块 / 挂载 / 时间 / AppArmor / systemd / `ptrace` / `memfd_create` / `bpf` / `unshare` / `io_uring` / `userfaultfd` / AF_ALG / 原始套接字。
+
+## 2026-10-09：execve 放宽到 `auid!=unset`
+
+现象：靶机上 root 跑 `vi testcr.json`，自采主机日志（audit.log → fluent-bit → 19006）里**没有任何记录**，只有腾讯云 CWP 收到。原因是原 `process_creation_user` 用 `-F auid>=1000`，**把 root（auid=0）整个排除**，而 `process_creation_bash` 的 `-F exe=` 匹配的是被执行的二进制（`vi` 不是 bash）。
+
+改法：`-F auid>=1000 -F auid!=unset` → `-F auid!=unset`（两 arch 各一条，仍保留 `process_creation_bash`）。key 名不变，**引擎侧 `host_audit_syscall/adm.oml` 的 key→operation 映射无需改**。
+
+- **覆盖**：SSH / 本地登录会话里的进程（root 与普通用户都算）。
+- **不覆盖**：`auid=unset` 的进程——开机守护进程、cron、云 agent（TAT / CWP），以及经 agent 远程执行的命令。要抓这类只能上全量 execve（overlay，+300 MB/天），不属本次变更。
+- **量**：靶机无交互用户，实测近 0；铺生产前按下面流程先靶机 24h 看量。
 
 ## 下发（先靶机，24h 看量再铺）
 

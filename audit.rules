@@ -492,11 +492,17 @@
 ### Collect generic execution telemetry and derive tool- and context-specific
 ### detections in downstream tooling such as Sigma / SIEM content.
 ## [dayu] full execve stays off (+300 MB/day on lab).
-## Interactive users + every bash. Lab: bash-only was +1 MB/day.
+## [dayu] 2026-10-09: auid>=1000 → auid!=unset。
+##   原规则只记 UID_MIN 以上的交互用户，**root 登录会话（auid=0）执行的进程一条都不记**
+##   （靶机上 root 跑 `vi testcr.json`，audit.log 里完全看不到，只有 CWP 侧有）。
+##   auid!=unset = 「有登录会话归属的进程」，覆盖 root + 普通用户；仍排除开机守护进程 /
+##   cron / 云 agent（auid=unset），量远低于全量 execve，不需要 High Volume overlay。
+##   key 名里的 user 指 audit 的 auid（会话归属），不是「非 root」。
+## every bash still covered by process_creation_bash below (Lab: +1 MB/day).
 #-a always,exit -F arch=b32 -S execve -S execveat -k process_creation
 #-a always,exit -F arch=b64 -S execve -S execveat -k process_creation
--a always,exit -F arch=b32 -S execve -S execveat -F auid>=1000 -F auid!=unset -k process_creation_user
--a always,exit -F arch=b64 -S execve -S execveat -F auid>=1000 -F auid!=unset -k process_creation_user
+-a always,exit -F arch=b32 -S execve -S execveat -F auid!=unset -k process_creation_user
+-a always,exit -F arch=b64 -S execve -S execveat -F auid!=unset -k process_creation_user
 -a always,exit -F arch=b32 -S execve -S execveat -F exe=/usr/bin/bash -k process_creation_bash
 -a always,exit -F arch=b64 -S execve -S execveat -F exe=/usr/bin/bash -k process_creation_bash
 ## [dayu] bash connect canary (reverse shell /dev/tcp). Not full connect().
