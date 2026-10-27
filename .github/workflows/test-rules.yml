@@ -27,3 +27,18 @@ jobs:
 
       - name: Validate rules on Ubuntu
         run: bash ./scripts/validate-rules-ci.sh audit.rules
+
+  kylin-fixtures:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check generator and preflight syntax
+        run: |
+          python3 -m py_compile scripts/prepare-kylin-rules.py
+          sh -n scripts/preflight-rulesd.sh
+          bash -n scripts/gen-privileged-rules.sh
+
+      - name: Fixture tests for the Kylin generator
+        run: python3 -m unittest discover -s tests -v

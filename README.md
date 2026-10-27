@@ -69,6 +69,70 @@ auditctl -R /tmp/audit.rules.strict
 The repository also includes GitHub Actions checks that lint the rules and
 validate that a portable CI copy and a strict copy can both be loaded on Ubuntu.
 
+## Kylin V10
+
+Kylin V10 ships a 4.19 kernel whose audit behaviour differs from the Ubuntu and
+RHEL hosts this baseline was developed on: `openat2` is not implemented at all,
+and the libaudit tables list legacy aarch64 names (`open`, `chmod`, `unlink`, ...)
+that the native ABI answers with `ENOSYS`. Because a single unknown syscall
+prevents a whole rule from loading — and `-i` hides that failure — Kylin hosts
+must not load `audit.rules` as-is.
+
+Generate the adapted rules on the target host instead:
+
+```bash
+python3 scripts/prepare-kylin-rules.py --source audit.rules --output-dir /var/tmp/dayu-kylin
+```
+
+The output path must not exist yet: both artifacts are written inside a private
+staging directory and published with an atomic no-replace directory rename
+(`renameat2`; the tool fails rather than degrading to per-file writes), so a
+concurrent run, a late-created path or a write failure cannot leave rules and
+report that disagree. Generate privileged watches separately with
+`scripts/gen-privileged-rules.sh` (per host) — it exits non-zero when a scan was
+incomplete, and that must stop the deployment.
+
+The tool is read-only: it records the host facts, refuses anything but a Kylin
+V10 4.19 host, resolves every `-S` against the host's own libaudit ABI tables
+(`ausyscall <arch> --dump`), drops names the *kernel* cannot run even when the
+table lists them (`openat2`, and the aarch64 legacy stubs for the native ABI),
+skips and reports missing `-w`/`dir=`/`exe=` targets, rewrites `auid>=1000` to
+the host `UID_MIN` on every rule (including rules without `-S`), removes `-i`,
+and writes `99-dayu.rules` plus a per-rule `coverage.json` (source line, key,
+kept/adapted/skipped, reason, generated line). It never loads rules, never
+touches boot parameters and never restarts the host; `audit=0` aborts with the
+maintenance-window action instead of pretending the kernel lacks audit support.
+
+On a Kylin V10 aarch64 host that already ran the unadapted baseline, 224 rules
+were loaded and none of the ten failed-access rules were: `openat2` made each whole
+rule fail while `-i` hid it. The adapted artifact keeps the same policy in 174
+directive lines with `unauthedfileaccess` back at 10 rules; a strict load on an
+isolated Kylin host is still pending (see `DAYU.md`).
+
+A generation fails (exit 4) when a key that must survive — `process_creation_user`,
+`process_creation_bash`, `unauthedfileaccess`, `perm_mod`, `delete` — loses all of
+its rules, or when one of its core syscalls cannot be confirmed in the host ABI
+table (a surviving `execveat` does not compensate for a missing `execve`), or when
+an ABI table cannot be confirmed. Deployment, conflict scanning,
+isolated validation and rollback are described in
+`.agents/skills/auditd-rules-install/SKILL.md` and `DAYU.md`.
+
+Before writing into `rules.d`, run the read-only layout scanner — it mirrors the
+`augenrules` concatenation order (`ls -1v`) and reports a `-D` that runs after
+rules were added, byte-identical duplicate watches (kernel answers `Rule exists`
+and the whole load aborts), same-watch-different-key overlap, leftover `-i`, and
+multiple `-D` files:
+
+```bash
+bash scripts/preflight-rulesd.sh /etc/audit/rules.d
+```
+
+Fixture tests (no Kylin host required, synthetic sysroots and ABI tables):
+
+```bash
+python3 -m unittest discover -s tests
+```
+
 ## UID_MIN
 
 Several rules in `audit.rules` use `auid>=1000 -F auid!=unset` to focus on
